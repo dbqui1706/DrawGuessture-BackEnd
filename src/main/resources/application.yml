@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: game-draw-gesture
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 5000
+    jackson:
+      time-zone: Asia/Ho_Chi_Minh
+      date-format: yyyy-MM-dd HH:mm:ss
+      time-format: HH:mm:ss
+server:
+  address: 0.0.0.0
+  port: 8080
