@@ -1,58 +1,96 @@
 package fit.nlu.controller;
 
 import fit.nlu.dto.request.CreateRoomRequest;
+import fit.nlu.dto.request.JoinRoomRequest;
 import fit.nlu.dto.response.ListRoomResponse;
+import fit.nlu.exception.GameException;
 import fit.nlu.model.Player;
 import fit.nlu.model.Room;
 import fit.nlu.service.RoomService;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/game")
+@RequiredArgsConstructor
+@CrossOrigin("*")
 public class GameController {
     private static final Logger log = LoggerFactory.getLogger(GameController.class);
-    @Autowired
-    private RoomService roomService;
+    private final RoomService roomService;
+    private final SimpMessagingTemplate simpMessagingTemplate;
 
-    public GameController(RoomService roomService) {
-        this.roomService = roomService;
-    }
-
-    @GetMapping("/rooms")
-    public ResponseEntity<List<ListRoomResponse>> getRooms() {
-        return ResponseEntity.ok(roomService.getRooms());
-    }
-
-    @PostMapping("/create-room")
-    public ResponseEntity<Room> createRoom(@RequestBody Player owner) {
-        log.info("Received create room request: {}", owner);
+    @MessageMapping("/room.create")
+    @SendTo("/topic/room.create")
+    public Room handleCreateRoom(@Payload Player owner) {
+        System.out.println("Received create room request from player: " + owner.getId());
+        log.info("Received create room request from player: {}", owner.getId());
         try {
-            Room room = roomService.createRoom(owner);
-            return ResponseEntity.ok(room);
+            return roomService.createRoom(owner);
         } catch (Exception e) {
             log.error("Error creating room: ", e);
-            return ResponseEntity.badRequest().build();
+            // Gửi thông báo lỗi về cho client gốc
+            simpMessagingTemplate.convertAndSendToUser(
+                    owner.getId().toString(),
+                    "/queue/errors",
+                    new GameException("Không thể tạo phòng: " + e.getMessage())
+            );
+            return null;
         }
     }
 
-    @PostMapping("/join-room")
-    public ResponseEntity<Room> joinRoom(@RequestParam String roomId, @RequestBody Player player) {
-        log.info("Received join room request: {}", player);
+    @MessageMapping("/room.join")
+//    @SendTo("/topic/rooms")
+    public Room handleJoinRoom(@Payload JoinRoomRequest joinRoomRequest) {
+        log.info("Received join room request: room={}, player={}",
+                joinRoomRequest.getRoomId(), joinRoomRequest.getPlayer().getId());
         try {
-            Room room = roomService.joinRoom(roomId, player);
-            return ResponseEntity.ok(room);
+            return roomService.joinRoom(joinRoomRequest.getRoomId(), joinRoomRequest.getPlayer());
+            // RoomService sẽ tự handle việc gửi updates
         } catch (Exception e) {
             log.error("Error joining room: ", e);
-            return ResponseEntity.badRequest().build();
+            simpMessagingTemplate.convertAndSendToUser(
+                    joinRoomRequest.getPlayer().getId().toString(),
+                    "/queue/errors",
+                    new GameException("Không thể tham gia phòng: " + e.getMessage())
+            );
+
+            return null;
         }
+    }
+
+    @MessageMapping("/room.leave")
+    public void handleLeaveRoom(String roomId, Player player) {
+        log.info("Received leave room request: room={}, player={}",
+                roomId, player.getId());
+        try {
+            roomService.leaveRoom(roomId, player);
+        } catch (Exception e) {
+            log.error("Error leaving room: ", e);
+            simpMessagingTemplate.convertAndSendToUser(
+                    player.getId().toString(),
+                    "/queue/errors",
+                    new GameException("Lỗi khi rời phòng: " + e.getMessage())
+            );
+        }
+    }
+
+    // API endpoint để lấy danh sách phòng
+    @MessageMapping("/rooms")
+    @SendTo("/topic/rooms")
+    public List<ListRoomResponse> getRooms() {
+        log.info("Received request for room list");
+        List<ListRoomResponse> rooms = roomService.getRooms();
+        log.info("Returning {} rooms", rooms.size());
+        return rooms;
     }
 }

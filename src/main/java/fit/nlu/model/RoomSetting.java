@@ -17,9 +17,9 @@ public class RoomSetting {
     private List<String> customWords;
 
     public RoomSetting() {
-        this.maxPlayer = 8;
+        this.maxPlayer = 4;
         this.totalRound = 3;
-        this.drawingTime = 120;
+        this.drawingTime = 60;
         this.dictionary = Set.of("animal", "fruits", "countries");
         this.customWords = List.of();
     }
