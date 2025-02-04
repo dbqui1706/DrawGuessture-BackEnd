@@ -1,10 +1,13 @@
 package fit.nlu.service;
 
 import fit.nlu.dto.response.ListRoomResponse;
+import fit.nlu.enums.MessageType;
 import fit.nlu.enums.RoomState;
 import fit.nlu.exception.GameException;
+import fit.nlu.model.Message;
 import fit.nlu.model.Player;
 import fit.nlu.model.Room;
+import fit.nlu.model.RoomSetting;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,10 +30,18 @@ public class RoomService {
     public Room createRoom(Player owner) {
         Room room = new Room(owner);
         rooms.put(room.getId().toString(), room);
+        owner.setOwner(true);
         owner.setRoomId(room.getId().toString());
         // Broadcast thông báo có phòng mới cho tất cả users
         broadcastRoomListUpdate();
         log.info("Created new room: {}", room.getId());
+
+
+        // Notify tin nhắn Player nào là chủ phòng
+        Message message = new Message();
+        message.setType(MessageType.CREATE_ROOM);
+        message.setSender(owner);
+        broadcastMessage(room.getId().toString(), message);
         return room;
     }
 
@@ -61,6 +72,12 @@ public class RoomService {
 
         // Thông báo cho tất cả người chơi trong phòng về người chơi mới
         sendRoomUpdate(room);
+
+        // THông báo cho mọi người trong phòng một message là player này đã tham gia phòng
+        Message message = new Message();
+        message.setType(MessageType.PLAYER_JOIN);
+        message.setSender(player);
+        broadcastMessage(roomId, message);
 
         // Cập nhật danh sách phòng cho tất cả users
         broadcastRoomListUpdate();
@@ -94,18 +111,35 @@ public class RoomService {
 
         // Thông báo cập nhật cho những người còn lại trong phòng
         if (!room.getPlayers().isEmpty()) {
+            // Update room
             sendRoomUpdate(room);
-            // Notify cho các người chơi trong phòng là player này đã rời phòng
-            simpMessagingTemplate.convertAndSend(
-                    "/topic/room/" + roomId + "/leave",
-                    player
-            );
+
+            // Notify cho các người chơi trong phòng một message là player này đã rời phòng
+            Message message = new Message();
+            message.setType(MessageType.PLAYER_LEAVE);
+            message.setSender(player);
+            broadcastMessage(roomId, message);
         }
 
         // Cập nhật danh sách phòng cho tất cả users
         broadcastRoomListUpdate();
 
         log.info("Player {} left room {}", player.getId(), roomId);
+    }
+
+    public RoomSetting updateRoomOptions(String roomId, RoomSetting newSetting) {
+        Room room = rooms.get(roomId);
+        if (room == null) {
+            log.error("Room not found: {}", roomId);
+            throw new GameException("Phòng không tồn tại");
+        }
+
+        room.setSetting(newSetting);
+        log.info("Room {} options updated to {}", roomId, newSetting);
+
+        // Thông báo cập nhật cho tất cả người trên server
+        broadcastRoomListUpdate();
+        return newSetting;
     }
 
     private List<ListRoomResponse> createRoomResponseList() {
@@ -128,6 +162,13 @@ public class RoomService {
         simpMessagingTemplate.convertAndSend(
                 "/topic/room/" + room.getId() + "/update",
                 room
+        );
+    }
+
+    private void broadcastMessage(String roomId, Message message) {
+        simpMessagingTemplate.convertAndSend(
+                "/topic/room/" + roomId + "/message",
+                message
         );
     }
 

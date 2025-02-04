@@ -6,12 +6,14 @@ import fit.nlu.dto.response.ListRoomResponse;
 import fit.nlu.exception.GameException;
 import fit.nlu.model.Player;
 import fit.nlu.model.Room;
+import fit.nlu.model.RoomSetting;
 import fit.nlu.service.RoomService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
@@ -28,6 +30,23 @@ public class GameController {
     private static final Logger log = LoggerFactory.getLogger(GameController.class);
     private final RoomService roomService;
     private final SimpMessagingTemplate simpMessagingTemplate;
+
+    @MessageMapping("/room/{roomId}/options")
+    @SendTo("/topic/room/{roomId}/options")
+    public RoomSetting handleRoomOptions(
+        @DestinationVariable String roomId,
+        @Payload RoomSetting settings
+    ) {
+        // Log the incoming request
+        log.info("Received room options update for room {}: {}", roomId, settings);
+        try {
+            return roomService.updateRoomOptions(roomId, settings);
+        } catch (Exception e) {
+            log.error("Error updating room options: ", e);
+            return null;
+        }
+    }
+
 
     @MessageMapping("/room.create")
     @SendTo("/topic/room.create")

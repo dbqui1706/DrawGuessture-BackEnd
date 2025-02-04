@@ -2,6 +2,7 @@ package fit.nlu.enums;
 
 public enum MessageType {
     CHAT,
+    CREATE_ROOM,
     SYSTEM,
     GUESS,
     DRAWING,
