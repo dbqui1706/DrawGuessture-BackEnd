@@ -34,8 +34,8 @@ public class GameController {
     @MessageMapping("/room/{roomId}/options")
     @SendTo("/topic/room/{roomId}/options")
     public RoomSetting handleRoomOptions(
-        @DestinationVariable String roomId,
-        @Payload RoomSetting settings
+            @DestinationVariable String roomId,
+            @Payload RoomSetting settings
     ) {
         // Log the incoming request
         log.info("Received room options update for room {}: {}", roomId, settings);
@@ -47,6 +47,15 @@ public class GameController {
         }
     }
 
+    @MessageMapping("/room/{roomId}/start")
+    public void handleStartGame(@DestinationVariable String roomId) {
+        log.info("Received start game request for room: {}", roomId);
+        try {
+            roomService.startGame(roomId);
+        } catch (Exception e) {
+            log.error("Error starting game: ", e);
+        }
+    }
 
     @MessageMapping("/room.create")
     @SendTo("/topic/room.create")

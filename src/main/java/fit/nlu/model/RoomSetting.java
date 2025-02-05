@@ -5,12 +5,13 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.Set;
 @Getter
 @Setter
 @ToString
-public class RoomSetting {
+public class RoomSetting  implements Serializable {
     public static final int MIN_PLAYER_TO_START = 2;
     private int maxPlayer;
     private int totalRound;

@@ -4,5 +4,7 @@ public enum GameState {
     WAITING,
     PLAYING,
     ROUND_END,
-    GAME_END
+    GAME_END,
+    IN_PROGRESS,
+    COMPLETED
 }

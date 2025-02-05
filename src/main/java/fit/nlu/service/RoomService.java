@@ -4,15 +4,12 @@ import fit.nlu.dto.response.ListRoomResponse;
 import fit.nlu.enums.MessageType;
 import fit.nlu.enums.RoomState;
 import fit.nlu.exception.GameException;
-import fit.nlu.model.Message;
-import fit.nlu.model.Player;
-import fit.nlu.model.Room;
-import fit.nlu.model.RoomSetting;
+import fit.nlu.model.*;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +21,7 @@ public class RoomService {
     private static final Logger log = LoggerFactory.getLogger(RoomService.class);
     private final ConcurrentHashMap<String, Room> rooms = new ConcurrentHashMap<>();
     private final SimpMessagingTemplate simpMessagingTemplate;
-
+    private final GameEventNotifier notifier;
 
     // Tạo phòng mới
     public Room createRoom(Player owner) {
@@ -70,6 +67,14 @@ public class RoomService {
         room.addPlayer(player);
         player.setRoomId(roomId);
 
+        // Nếu game đã bắt đầu, cập nhật Round hiện tại
+        if (room.getState() != RoomState.WAITING && room.getGameSession() != null) {
+            Round currentRound = room.getGameSession().getCurrentRound();
+            if (currentRound != null && currentRound.getRemainingPlayers() != null) {
+                currentRound.addPlayer(player);
+            }
+        }
+
         // Thông báo cho tất cả người chơi trong phòng về người chơi mới
         sendRoomUpdate(room);
 
@@ -92,6 +97,21 @@ public class RoomService {
         if (room == null) {
             log.error("Room not found: {}", roomId);
             throw new GameException("Phòng không tồn tại");
+        }
+
+        // Nếu game đang diễn ra, cập nhật Round hiện tại
+        if (room.getState() != RoomState.WAITING && room.getGameSession() != null) {
+            Round currentRound = room.getGameSession().getCurrentRound();
+            if (currentRound != null) {
+                // Nếu player đang ở trong remainingPlayers thì loại bỏ ngay
+                currentRound.removePlayer(player);
+                // Nếu player đang là drawer trong turn hiện tại, xử lý kết thúc turn
+                Turn currentTurn = currentRound.getCurrentTurn();
+                if (currentTurn != null && currentTurn.getDrawer().getId().equals(player.getId())) {
+                    currentTurn.completedTurn();
+                    notifier.notifyTurnEnd(roomId, currentTurn);
+                }
+            }
         }
 
         room.removePlayer(player.getId());
@@ -123,9 +143,38 @@ public class RoomService {
 
         // Cập nhật danh sách phòng cho tất cả users
         broadcastRoomListUpdate();
-
         log.info("Player {} left room {}", player.getId(), roomId);
     }
+
+    // Bắt đầu game với real-time notification
+    public void startGame(String roomId) {
+        Room room = rooms.get(roomId);
+        if (room == null) {
+            log.error("Room not found: {}", roomId);
+            throw new GameException("Phòng không tồn tại");
+        }
+
+        if (room.getPlayers().size() < 2) {
+            log.error("Not enough players to start the game in room: {}", roomId);
+            throw new GameException("Phải có ít nhất 2 người chơi để bắt đầu game");
+        }
+
+        if (room.getState() != RoomState.WAITING) {
+            log.error("Game has already started in room: {}", roomId);
+            throw new GameException("Game đã bắt đầu");
+        }
+
+        room.setState(RoomState.PLAYING);
+
+        // Update room
+        sendRoomUpdate(room);
+
+        // Gọi hàm startGameSession, truyền notifier để game logic gửi thông báo sau này.
+        room.startGameSession(notifier);
+
+        log.info("Game started in room: {}", roomId);
+    }
+
 
     public RoomSetting updateRoomOptions(String roomId, RoomSetting newSetting) {
         Room room = rooms.get(roomId);
@@ -148,7 +197,7 @@ public class RoomService {
         for (Room room : roomList) {
             ListRoomResponse currentRoom = new ListRoomResponse(
                     room.getId().toString(),
-                    room.getId().toString().substring(0, 8),
+                    room.getId().toString().substring(0, 5),
                     room.getSetting().getMaxPlayer(),
                     room.getPlayers().size(),
                     room.getState()

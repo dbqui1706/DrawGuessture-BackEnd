@@ -1,41 +1,71 @@
 package fit.nlu.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import fit.nlu.enums.GameState;
+import fit.nlu.service.GameEventNotifier;
 import lombok.Data;
 
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Data
-@JsonIgnoreProperties(ignoreUnknown = true) // Ignore this class when serializing to JSON
 public class GameSession {
-    private UUID id;
-    @JsonIgnore
-    private Room room;
-    private List<Round> rounds;
+    private final String id;
+    private final List<Round> rounds;
     private Round currentRound;
     private List<Player> players;
-    private Map<UUID, Integer> scores;
     private GameState state;
     private Timestamp startTime;
     private Timestamp endTime;
+    private int currentRoundNumber;
+    private final int totalRounds;
+    private final int turnTimeLimit;
+    private final String roomId;
+    private final GameEventNotifier notifier;
 
-    public GameSession(Room room, List<Player> players, int totalRound) {
-        this.id = UUID.randomUUID();
-        this.room = room;
+    public GameSession(List<Player> players, int totalRounds, int turnTimeLimit, String roomId, GameEventNotifier notifier) {
+        this.id = UUID.randomUUID().toString();
         this.players = players;
-        this.scores = new ConcurrentHashMap<>();
-        for (Player player : players) {
-            scores.put(player.getId(), 0);
-        }
-        this.rounds = new ArrayList<>(totalRound);
+        this.totalRounds = totalRounds;
+        this.turnTimeLimit = turnTimeLimit;
+        this.rounds = new ArrayList<>();
         this.state = GameState.WAITING;
+        this.roomId = roomId;
+        this.notifier = notifier;
+    }
+
+    public void startGame() {
+        this.state = GameState.IN_PROGRESS;
         this.startTime = new Timestamp(System.currentTimeMillis());
+        this.currentRoundNumber = 1;
+        System.out.println("Game started.");
+        notifier.notifyGameStart(roomId);
+        startRound();
+    }
+
+    private void startRound() {
+        currentRound = new Round(players, turnTimeLimit, roomId, notifier, currentRoundNumber);
+        rounds.add(currentRound);
+        currentRound.startRound(() -> {
+            if (currentRoundNumber < totalRounds) {
+                currentRoundNumber++;
+                startRound();
+            } else {
+                endGame();
+            }
+        });
+    }
+
+    private void endGame() {
+        if (state == GameState.COMPLETED) return;
+        this.state = GameState.COMPLETED;
+        this.endTime = new Timestamp(System.currentTimeMillis());
+        System.out.println("Game ended.");
+        notifier.notifyGameEnd(roomId);
+    }
+
+    public void updatePlayers(List<Player> newPlayers) {
+        this.players = newPlayers;
     }
 }

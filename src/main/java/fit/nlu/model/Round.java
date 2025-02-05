@@ -1,15 +1,100 @@
 package fit.nlu.model;
 
+import fit.nlu.enums.RoundState;
+import fit.nlu.service.GameEventNotifier;
+import lombok.Data;
+
+import java.io.Serializable;
 import java.sql.Timestamp;
 import java.util.*;
 
-public class Round {
-    private UUID id;
-    private List<Turn> turns;
+@Data
+public class Round implements Serializable {
+    private final String id;
+    private final List<Turn> turns;
     private Turn currentTurn;
-    private Queue<Player> remainingPlayers;
-    private Set<Player> completedPlayers;
-    private Map<UUID, Integer> roundScores;
+    private final Queue<Player> remainingPlayers;
+    private final Set<Player> completedPlayers;
+    private RoundState state;
     private Timestamp startTime;
     private Timestamp endTime;
+    private final int turnTimeLimit;
+    private final String roomId;
+    private final GameEventNotifier notifier;
+    private final int roundNumber;
+
+    public Round(List<Player> players, int turnTimeLimit, String roomId, GameEventNotifier notifier, int roundNumber) {
+        this.id = UUID.randomUUID().toString();
+        this.turns = new ArrayList<>();
+        this.remainingPlayers = new LinkedList<>(players);
+        this.completedPlayers = new HashSet<>();
+        this.state = RoundState.NOT_STARTED;
+        this.turnTimeLimit = turnTimeLimit;
+        this.roomId = roomId;
+        this.notifier = notifier;
+        this.roundNumber = roundNumber;
+    }
+
+    public void startRound(Runnable onRoundEndCallback) {
+        this.state = RoundState.IN_PROGRESS;
+        this.startTime = new Timestamp(System.currentTimeMillis());
+        System.out.println("Round started: " + roundNumber);
+        notifier.notifyRoundStart(roomId, roundNumber);
+
+        nextTurn(onRoundEndCallback);
+    }
+
+    public synchronized void nextTurn(Runnable onRoundEndCallback) {
+        if (!remainingPlayers.isEmpty()) {
+            Player nextDrawer = remainingPlayers.poll();
+            String keyword = KeywordGenerator.getRandomKeyword();
+            Turn newTurn = new Turn(nextDrawer, keyword, turnTimeLimit, roomId, notifier);
+            this.currentTurn = newTurn;
+            this.turns.add(newTurn);
+            newTurn.startTurn(() -> {
+                completedPlayers.add(nextDrawer);
+                nextTurn(onRoundEndCallback);
+            });
+        } else {
+            endRound();
+            notifier.notifyRoundEnd(roomId, roundNumber);
+            onRoundEndCallback.run();
+        }
+    }
+
+    public void endRound() {
+        if (state == RoundState.COMPLETED) return;
+        this.state = RoundState.COMPLETED;
+        this.endTime = new Timestamp(System.currentTimeMillis());
+        System.out.println("Round completed: " + roundNumber);
+    }
+
+
+    /**
+     * Thêm người chơi vào remainingPlayers nếu họ chưa có.
+     */
+    public synchronized void addPlayer(Player player) {
+        // Kiểm tra nếu người chơi chưa được hoàn thành turn và chưa tồn tại trong remainingPlayers
+        if (!remainingPlayers.contains(player) && !completedPlayers.contains(player)) {
+            remainingPlayers.add(player);
+            System.out.println("Player " + player.getNickname() + " added to current round.");
+        }
+    }
+
+    /**
+     * Loại bỏ người chơi khỏi remainingPlayers nếu tồn tại.
+     */
+    public synchronized void removePlayer(Player player) {
+        if (remainingPlayers.remove(player)) {
+            System.out.println("Player " + player.getNickname() + " removed from current round.");
+        }
+    }
+
+    public Turn getCurrentTurn() {
+        return currentTurn;
+    }
+
+    public synchronized Queue<Player> getRemainingPlayers() {
+        return new LinkedList<>(remainingPlayers);
+    }
 }
