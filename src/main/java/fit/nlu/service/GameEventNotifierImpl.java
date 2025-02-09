@@ -1,20 +1,31 @@
 package fit.nlu.service;
 
-import fit.nlu.dto.response.TurnDto;
 import fit.nlu.enums.MessageType;
 import fit.nlu.model.Message;
+import fit.nlu.model.Room;
 import fit.nlu.model.Turn;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
-@RequiredArgsConstructor
 public class GameEventNotifierImpl implements GameEventNotifier {
     private static final Logger log = LoggerFactory.getLogger(GameEventNotifierImpl.class);
     private final SimpMessagingTemplate simpMessagingTemplate;
+    private RoomService roomService;
+
+    public GameEventNotifierImpl(SimpMessagingTemplate simpMessagingTemplate) {
+        this.simpMessagingTemplate = simpMessagingTemplate;
+    }
+
+    @Lazy
+    @Autowired
+    public void setRoomService(RoomService roomService) {
+        this.roomService = roomService;
+    }
 
     @Override
     public void notifyGameStart(String roomId) {
@@ -35,14 +46,7 @@ public class GameEventNotifierImpl implements GameEventNotifier {
     }
 
     @Override
-    public void notifyTurnStart(String roomId, Turn turn) {
-        TurnDto turnDto = new TurnDto();
-        turnDto.setTurnId(turn.getId());
-        turnDto.setDrawer(turn.getDrawer());
-        turnDto.setTimeLimit(turn.getTimeLimit());
-        turnDto.setKeyword(turn.getKeyword()); // Cho người vẽ biết keyword
-        turnDto.setEventType("TURN_START");
-
+    public synchronized void notifyTurnStart(String roomId, Turn turn) {
         String drawerName = turn.getDrawer().getNickname();
         Message message = new Message();
         message.setSender(turn.getDrawer());
@@ -50,7 +54,20 @@ public class GameEventNotifierImpl implements GameEventNotifier {
         message.setContent("Lượt vẽ của " + drawerName);
 
         simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/message", message);
-        simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/turn", turnDto);
+
+        Room room = roomService.getRoomById(roomId);
+        // Cập nhập danh sách Player nào đang vẽ
+        room.updatePlayerDrawing(turn.getDrawer().getId());
+
+        if (room == null) {
+            log.error("Room {} not found", roomId);
+            return;
+        } else {
+            // Gửi Turn để bên client cập nhật thông tin
+            simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/turn", turn);
+            log.info("Notified room update for room {} with turn start", roomId);
+        }
+
         log.info("Notified turn start for drawer {} in room {}", drawerName, roomId);
     }
 
@@ -82,5 +99,14 @@ public class GameEventNotifierImpl implements GameEventNotifier {
         message.setContent("Game kết thúc");
         simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/message", message);
         log.info("Notified game end for room: {}", roomId);
+    }
+
+    @Override
+    public void notifyTurnTimeUpdate(String roomId, Turn turn) {
+        Message message = new Message();
+        message.setType(MessageType.TIME_TURN_UPDATE);
+        message.setContent(String.valueOf(turn.getServerRemainingTime()));
+
+        simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/time", message);
     }
 }

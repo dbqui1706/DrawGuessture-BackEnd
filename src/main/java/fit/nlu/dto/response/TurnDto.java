@@ -8,6 +8,7 @@ public class TurnDto {
     private String turnId;
     private Player drawer;
     private int timeLimit;
+    private int remainingTime; // Thời gian còn lại của turn
     private String keyword; // Chỉ có giá trị với người vẽ; null đối với người đoán
     private String eventType; // Ví dụ: "TURN_START"
 

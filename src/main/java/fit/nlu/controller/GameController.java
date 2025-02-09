@@ -4,6 +4,7 @@ import fit.nlu.dto.request.CreateRoomRequest;
 import fit.nlu.dto.request.JoinRoomRequest;
 import fit.nlu.dto.response.ListRoomResponse;
 import fit.nlu.exception.GameException;
+import fit.nlu.model.DrawingData;
 import fit.nlu.model.Player;
 import fit.nlu.model.Room;
 import fit.nlu.model.RoomSetting;
@@ -55,6 +56,16 @@ public class GameController {
         } catch (Exception e) {
             log.error("Error starting game: ", e);
         }
+    }
+
+    @MessageMapping("/room/{roomId}/draw")
+    @SendTo("/topic/room/{roomId}/draw")
+    public DrawingData drawingData(@DestinationVariable String roomId,
+                                   @Payload DrawingData drawingData) {
+        log.info("Received drawing data for room {}: {}", roomId, drawingData);
+
+        return roomService.addDrawingData(roomId, drawingData) ? drawingData : null;
+
     }
 
     @MessageMapping("/room.create")

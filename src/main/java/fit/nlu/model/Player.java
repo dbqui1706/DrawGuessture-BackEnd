@@ -13,6 +13,6 @@ public class Player {
     private boolean isOwner;
     private String avatar;
     private int score;
-    private boolean isDrawing;
+    private boolean drawing;
     private PlayerStatus status;
 }

@@ -45,7 +45,7 @@ public class Room implements Serializable {
         return players.size() < setting.getMaxPlayer();
     }
 
-    public void addPlayer(Player player) {
+    public synchronized void addPlayer(Player player) {
         if (canJoin()) {
             player.setRoomId(id.toString());
             players.put(player.getId(), player);
@@ -54,7 +54,7 @@ public class Room implements Serializable {
         }
     }
 
-    public void removePlayer(UUID playerId) {
+    public synchronized void removePlayer(UUID playerId) {
         players.remove(playerId);
     }
 
@@ -66,7 +66,25 @@ public class Room implements Serializable {
         this.gameSession = new GameSession(playerList, totalRounds, turnTimeLimit, id.toString(), notifier);
         gameSession.startGame();
     }
-    public List<Player> getCurrentPlayers() {
+
+    // Kết thúc GameSession
+    public void endGameSession() {
+        if (gameSession != null) {
+            gameSession.endGame();
+        }
+    }
+
+    public synchronized List<Player> getCurrentPlayers() {
         return new ArrayList<>(players.values());
+    }
+
+    public synchronized void updatePlayerDrawing(UUID playerId) {
+        players.forEach((id, player) -> {
+            if (id.equals(playerId)) {
+                player.setDrawing(true);
+            } else {
+                player.setDrawing(false);
+            }
+        });
     }
 }

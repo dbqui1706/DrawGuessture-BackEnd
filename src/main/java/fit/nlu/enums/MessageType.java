@@ -11,5 +11,5 @@ public enum MessageType {
     TURN_END,
     ROUND_END,
     GAME_END,
-    ERROR
+    UPDATE_OWNER, TIME_TURN_UPDATE, ERROR
 }
