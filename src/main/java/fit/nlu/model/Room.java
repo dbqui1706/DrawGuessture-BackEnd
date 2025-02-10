@@ -71,6 +71,7 @@ public class Room implements Serializable {
     public void endGameSession() {
         if (gameSession != null) {
             gameSession.endGame();
+            gameSession = null;
         }
     }
 

@@ -3,6 +3,7 @@ package fit.nlu.model;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import fit.nlu.enums.TurnState;
 import fit.nlu.service.GameEventNotifier;
+import jakarta.servlet.http.PushBuilder;
 import lombok.Getter;
 import org.slf4j.Logger;
 
@@ -18,13 +19,14 @@ public class Turn implements Serializable {
     @Getter
     private final Player drawer;
     private final String keyword;
-    private final List<Guess> guesses;
     private TurnState state;
     private Timestamp startTime;
     private Timestamp endTime;
     private final int timeLimit; // giây
+    private final Set<Guess> guesses;
     private Stack<DrawingData> drawingDataList;
     private Stack<DrawingData> redoDrawingDataStack;
+    private List<Player> currentPlayers;
     @Getter
     private int serverRemainingTime; // Thời gian còn lại được tính từ server
     @JsonIgnore
@@ -39,12 +41,14 @@ public class Turn implements Serializable {
     private final String roomId;
     @JsonIgnore
     private final GameEventNotifier notifier;
+    @JsonIgnore
+    private Runnable onTurnEndCallback;
 
     public Turn(Player drawer, String keyword, int timeLimit, String roomId, GameEventNotifier notifier) {
         this.id = UUID.randomUUID().toString();
         this.drawer = drawer;
         this.keyword = keyword;
-        this.guesses = new ArrayList<>();
+        this.guesses = new ConcurrentSkipListSet<>(Comparator.comparing(Guess::getTimeTaken));
         this.state = TurnState.NOT_STARTED;
         this.timeLimit = timeLimit;
         this.roomId = roomId;
@@ -55,6 +59,8 @@ public class Turn implements Serializable {
 
     public void startTurn(Runnable onTurnEndCallback) {
         if (state == TurnState.COMPLETED) return;
+        this.onTurnEndCallback = onTurnEndCallback;
+
         this.state = TurnState.IN_PROGRESS;
         this.startTime = new Timestamp(System.currentTimeMillis());
         System.out.println("Turn started for drawer: " + drawer.getNickname());
@@ -72,8 +78,21 @@ public class Turn implements Serializable {
         scheduledTask = scheduler.schedule(() -> {
             completedTurn();
             notifier.notifyTurnEnd(roomId, this);
-            onTurnEndCallback.run();
+            // Gọi callback để chuyển sang turn tiếp theo
+            this.onTurnEndCallback.run();
         }, timeLimit, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Hàm kết thúc turn, thông báo và gọi callback chuyển turn.
+     */
+    public synchronized void endTurn() {
+        if (state == TurnState.COMPLETED) return;
+        completedTurn();
+        notifier.notifyTurnEnd(roomId, this);
+        if (onTurnEndCallback != null) {
+            onTurnEndCallback.run();
+        }
     }
 
     public void completedTurn() {
@@ -95,10 +114,30 @@ public class Turn implements Serializable {
 
     public synchronized void submitGuess(Guess guess) {
         if (state != TurnState.IN_PROGRESS) return;
-        if (guess.getContent().equalsIgnoreCase(keyword)) {
-            guesses.add(guess);
+        // Nếu người chơi đã đoán trước đó, không thêm lại.
+        if (guesses.stream().anyMatch(g -> g.getPlayer().getId().equals(guess.getPlayer().getId()))) return;
+        guess.setTimestamp(startTime);
+        guesses.add(guess);
+
+        // chỉ gọi hàm kiểm tra riêng để lên lịch kết thúc turn sau delay nếu đủ điều kiện.
+        checkAndScheduleEndTurn();
+    }
+    /**
+     * Kiểm tra nếu đủ người đoán đúng và lên lịch kết thúc turn sau một khoảng delay ngắn.
+     */
+    private synchronized void checkAndScheduleEndTurn() {
+        // Kiểm tra: số lượng guess đạt đủ số người chơi hiện tại (trừ người vẽ)
+        if (currentPlayers != null && guesses.size() >= currentPlayers.size() - 1) {
+            // Lên lịch kết thúc turn sau 500ms để đảm bảo tin nhắn đoán cuối cùng được xử lý.
+            scheduler.schedule(() -> {
+                // Kiểm tra lại điều kiện và trạng thái trước khi kết thúc
+                if (state != TurnState.COMPLETED && guesses.size() >= currentPlayers.size() - 1) {
+                    endTurn();
+                }
+            }, 500, TimeUnit.MILLISECONDS);
         }
     }
+
 
     public int getRemainingTime() {
         if (startTime == null) return timeLimit;
@@ -119,6 +158,10 @@ public class Turn implements Serializable {
         timeUpdateScheduler.shutdownNow(); // Dừng scheduler ngay lập tức
         this.state = TurnState.COMPLETED;
         System.out.println("Turn forcibly stopped for drawer: " + drawer.getNickname());
+    }
+
+    public synchronized void setCurrentPlayers(List<Player> currentPlayers) {
+        this.currentPlayers = currentPlayers;
     }
 
     public void addDrawingData(DrawingData drawingData) {

@@ -17,7 +17,6 @@ public class Guess {
         this.id = UUID.randomUUID();
         this.player = player;
         this.content = guess;
-        this.timestamp = new Timestamp(System.currentTimeMillis());
         this.timeTaken = new Timestamp(System.currentTimeMillis());
     }
 }

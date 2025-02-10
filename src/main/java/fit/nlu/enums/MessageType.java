@@ -1,6 +1,7 @@
 package fit.nlu.enums;
 
 public enum MessageType {
+    CHAT,
     CREATE_ROOM,
     GAME_START,
     ROUND_START,

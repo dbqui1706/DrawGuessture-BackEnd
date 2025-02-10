@@ -6,6 +6,7 @@ import fit.nlu.enums.RoomState;
 import fit.nlu.exception.GameException;
 import fit.nlu.model.*;
 import lombok.RequiredArgsConstructor;
+import org.apache.juli.logging.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -85,9 +86,10 @@ public class RoomService {
         Message message = new Message();
         message.setType(MessageType.PLAYER_JOIN);
         message.setSender(player);
+
         roomEventNotifier.broadcastMessage(roomId, message);
         // Thông báo cập nhật phòng cho tất cả mọi người
-        roomEventNotifier.sendRoomUpdate(room);
+        roomEventNotifier.sendRoomJoin(room, player);
 
         // Cập nhật danh sách phòng cho tất cả users
         roomEventNotifier.broadcastRoomListUpdate(createRoomResponseList());
@@ -112,20 +114,18 @@ public class RoomService {
         handleRoomStateAfterLeaving(room, player);
 
         // Thông báo cập nhật cho những người còn lại trong phòng
+        roomEventNotifier.sendRoomUpdate(room);
         notifyPlayersAndBroadcast(room, player);
     }
 
     private void notifyPlayersAndBroadcast(Room room, Player player) {
         if (!room.getPlayers().isEmpty()) {
-
-            roomEventNotifier.sendRoomUpdate(room);
-
             Message message = new Message();
             message.setType(MessageType.PLAYER_LEAVE);
             message.setSender(player);
             roomEventNotifier.broadcastMessage(room.getId().toString(), message);
         }
-
+        log.info("notifyPlayersAndBroadcast room state {} and Player {}", room.getState(), room.getCurrentPlayers().size());
         roomEventNotifier.broadcastRoomListUpdate(createRoomResponseList());
         log.info("Player {} left room {}", player.getId(), room.getId());
     }
@@ -158,9 +158,16 @@ public class RoomService {
     }
 
     private void handleSinglePlayerLeft(Room room) {
+        log.info("Room {} has only 1 player left", room.getId());
+        // Chuyển trạng thái phòng về chờ
         room.setState(RoomState.WAITING);
+        // Set drawing cho người chơi còn lại về false
+        room.getPlayers().values().forEach(player -> player.setDrawing(false));
+        // Chuyển chủ phòng cho người còn lại
         Player newOwner = room.getPlayers().values().iterator().next();
         newOwner.setOwner(true);
+
+        // Kết thúc game nếu đang chơi
         room.endGameSession();
     }
 
@@ -264,6 +271,65 @@ public class RoomService {
         currentTurn.addDrawingData(data);
         return true;
     }
+
+    public Message chatMessage(String roomId, Message message) {
+        // 1. Lấy phòng và kiểm tra trạng thái
+        Room room = getRoomOrThrow(roomId);
+        if (room.getState() != RoomState.PLAYING) {
+            message.setContent(message.getSender().getNickname() + ": " + message.getContent());
+            return message;
+        }
+
+        GameSession gameSession = room.getGameSession();
+        if (gameSession == null) return message;
+
+        Turn currentTurn = gameSession.getCurrentTurn();
+        if (currentTurn == null) return message;
+        // Cập nhật danh sách người chơi trong turn hiện tại
+        currentTurn.setCurrentPlayers(room.getCurrentPlayers());
+
+        // 2. Lấy thông tin người gửi, người vẽ và keyword của lượt hiện tại
+        Player sender = message.getSender();
+        Player drawer = currentTurn.getDrawer();
+
+        String keyword = currentTurn.getKeyword().trim().toLowerCase();
+        String content = message.getContent().trim();
+        String contentLower = content.toLowerCase();
+
+        boolean isExactMatch = contentLower.equals(keyword);
+        boolean containsKeyword = contentLower.contains(keyword);
+
+        // 3. Xử lý đối với người vẽ (drawer)
+        if (sender.getId().equals(drawer.getId())) {
+            // Nếu người vẽ gửi bất kỳ tin nhắn nào chứa keyword (exact hoặc chứa), xóa nội dung tin nhắn.
+            if (containsKeyword) {
+                message.setContent(drawer.getNickname() + ": đã cố tình gian lận");
+            }else {
+                message.setContent(drawer.getNickname() + ": " + message.getContent());
+            }
+            return message;
+        }
+
+        // 4. Xử lý đối với người đoán (guesser)
+        if (isExactMatch) {
+            // Tin nhắn chính xác bằng keyword.
+            boolean alreadyGuessed = currentTurn.getGuesses().stream()
+                    .anyMatch(guess -> guess.getPlayer().getId().equals(sender.getId()));
+            if (!alreadyGuessed) {
+                // Nếu chưa tồn tại người chơi đoán đúng, thêm vào danh sách đoán đúng.
+                currentTurn.submitGuess(new Guess(sender, content));
+                message.setContent(sender.getNickname() + " đã đoán đúng từ khóa");
+                return message;
+            }else if (containsKeyword && alreadyGuessed) {
+                // Tin nhắn không phải exact match mà chỉ chứa keyword → xem là gian lận.
+                message.setContent(sender.getNickname() + ": đã cố tình gian lận");
+            }
+        }
+        // Nếu tin nhắn không chứa keyword thì giữ nguyên nội dung tin nhắn (chat bình thường)
+        message.setContent(sender.getNickname() + ": " + message.getContent());
+        return message;
+    }
+
 
     public RoomSetting updateRoomOptions(String roomId, RoomSetting newSetting) {
         Room room = rooms.get(roomId);

@@ -1,26 +1,20 @@
 package fit.nlu.controller;
 
-import fit.nlu.dto.request.CreateRoomRequest;
 import fit.nlu.dto.request.JoinRoomRequest;
 import fit.nlu.dto.response.ListRoomResponse;
 import fit.nlu.exception.GameException;
-import fit.nlu.model.DrawingData;
-import fit.nlu.model.Player;
-import fit.nlu.model.Room;
-import fit.nlu.model.RoomSetting;
+import fit.nlu.model.*;
 import fit.nlu.service.RoomService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
@@ -46,6 +40,17 @@ public class GameController {
             log.error("Error updating room options: ", e);
             return null;
         }
+    }
+
+    @MessageMapping("/room/{roomId}/guess")
+    @SendTo("/topic/room/{roomId}/guess")
+    public Message chatMessage(
+            @DestinationVariable String roomId,
+            @Payload Message message
+    ) {
+        log.info("Received chat message for room {}: {}", roomId, message);
+
+        return roomService.chatMessage(roomId, message);
     }
 
     @MessageMapping("/room/{roomId}/start")
