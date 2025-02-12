@@ -15,4 +15,8 @@ public class Player {
     private int score;
     private boolean drawing;
     private PlayerStatus status;
+
+    public void addScore(int score) {
+        this.score += score;
+    }
 }

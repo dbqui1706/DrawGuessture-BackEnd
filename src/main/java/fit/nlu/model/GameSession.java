@@ -62,7 +62,6 @@ public class GameSession {
     }
 
     public void endGame() {
-//        if (state == GameState.GAME_END) return;
         this.state = GameState.GAME_END;
         this.endTime = new Timestamp(System.currentTimeMillis());
         System.out.println("Game ended.");

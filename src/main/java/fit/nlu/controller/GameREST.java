@@ -49,4 +49,10 @@ public class GameREST {
         log.info("Received leave room request: room={}, player={}", roomId, player.getId());
         roomService.leaveRoom(roomId, player);
     }
+
+    @DeleteMapping("/clear-rooms")
+    public boolean clearRooms() {
+        log.info("Received clear rooms request");
+        return roomService.clearRooms();
+    }
 }

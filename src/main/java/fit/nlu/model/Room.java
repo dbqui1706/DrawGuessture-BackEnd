@@ -81,11 +81,18 @@ public class Room implements Serializable {
 
     public synchronized void updatePlayerDrawing(UUID playerId) {
         players.forEach((id, player) -> {
-            if (id.equals(playerId)) {
-                player.setDrawing(true);
-            } else {
-                player.setDrawing(false);
-            }
+            player.setDrawing(id.equals(playerId));
         });
+    }
+
+    public void updateScoreForPlayers(List<Player> currentPlayers) {
+        for (Player roomPlayer : getCurrentPlayers()) {
+            currentPlayers.stream()
+                    .filter(turnPlayer -> turnPlayer.getId().equals(roomPlayer.getId()))
+                    .findFirst()
+                    .ifPresent(turnPlayer -> {
+                        roomPlayer.setScore(turnPlayer.getScore());
+                    });
+        }
     }
 }

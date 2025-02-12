@@ -6,7 +6,6 @@ import fit.nlu.enums.RoomState;
 import fit.nlu.exception.GameException;
 import fit.nlu.model.*;
 import lombok.RequiredArgsConstructor;
-import org.apache.juli.logging.Log;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -18,7 +17,6 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -74,11 +72,15 @@ public class RoomService {
         room.addPlayer(player);
         player.setRoomId(roomId);
 
-        // Nếu game đã bắt đầu, cập nhật Round hiện tại
+        // Nếu game đã bắt đầu, cập nhật Round và Turn hiện tại
         if (room.getState() != RoomState.WAITING && room.getGameSession() != null) {
             Round currentRound = room.getGameSession().getCurrentRound();
             if (currentRound != null && currentRound.getRemainingPlayers() != null) {
                 currentRound.addPlayer(player);
+                Turn currentTurn = currentRound.getCurrentTurn();
+                if (currentTurn != null) {
+                    currentTurn.addPlayer(player);
+                }
             }
         }
 
@@ -139,6 +141,8 @@ public class RoomService {
             }
             // Nếu chỉ còn 1 người chơi thì kết thúc game chuyển về trạng thái chờ
             if (room.getPlayers().size() == 1) {
+                // Kết thúc game nếu đang chơi
+                room.endGameSession();
                 handleSinglePlayerLeft(room);
             }
         }
@@ -161,14 +165,12 @@ public class RoomService {
         log.info("Room {} has only 1 player left", room.getId());
         // Chuyển trạng thái phòng về chờ
         room.setState(RoomState.WAITING);
-        // Set drawing cho người chơi còn lại về false
-        room.getPlayers().values().forEach(player -> player.setDrawing(false));
-        // Chuyển chủ phòng cho người còn lại
-        Player newOwner = room.getPlayers().values().iterator().next();
-        newOwner.setOwner(true);
+        // Set drawing và score cho người chơi còn lại về false và 0
+        room.getPlayers().values().forEach(player -> {
+            player.setDrawing(false);
+            player.setScore(0);
+        });
 
-        // Kết thúc game nếu đang chơi
-        room.endGameSession();
     }
 
     /**
@@ -192,33 +194,42 @@ public class RoomService {
         if (room.getState() == RoomState.WAITING || room.getGameSession() == null) {
             return;
         }
+        if (room.getPlayers().size() < 2) {
+            room.setState(RoomState.WAITING);
+            room.endGameSession();
+            return;
+        }
 
         Round currentRound = room.getGameSession().getCurrentRound();
         if (currentRound == null) {
             return;
         }
+
         // Xóa người chơi khỏi round nếu họ còn tồn tại
         currentRound.removePlayer(player);
 
         Turn currentTurn = currentRound.getCurrentTurn();
+        if (currentTurn == null) return;
 
-        // Nếu không phải lượt của người rời phòng thì không cần xử lý
-        if (currentTurn == null || !currentTurn.getDrawer().getId().equals(player.getId())) return;
+        currentTurn.removePlayer(player);
 
-        // Nếu là lượt của người rời phòng
-        // 1. Kết thúc lượt vẽ
-        // 2. Chuyển lượt vẽ cho người tiếp theo
-        currentTurn.completedTurn();
-        notifier.notifyTurnEnd(room.getId().toString(), currentTurn);
+        // Nếu người rời phòng không phải là người vẽ, không cần thay đổi lượt vẽ
+        if (!currentTurn.getDrawer().getId().equals(player.getId())) return;
 
-        // Chuyển lượt vẽ cho người tiếp theo
-        currentRound.nextTurn(() -> {
-            if (currentRound.getRemainingPlayers().isEmpty()) {
-                currentRound.endRound();
-                notifier.notifyRoundEnd(room.getId().toString(), currentRound.getRoundNumber());
-            }
+        // Nếu là người vẽ -> Kết thúc lượt vẽ & hiển thị kết quả
+        currentTurn.completedTurn(() -> {
+            currentTurn.startThreadShowResultTurn(() -> {
+                // Khi kết quả hiển thị xong -> Bắt đầu lượt vẽ mới
+                currentRound.nextTurn(() -> {
+                    if (currentRound.getRemainingPlayers().isEmpty()) {
+                        currentRound.endRound();
+                        notifier.notifyRoundEnd(room.getId().toString(), currentRound.getRoundNumber());
+                    }
+                });
+            });
         });
 
+        notifier.notifyTurnEnd(room.getId().toString(), currentTurn);
     }
 
     // Lấy phòng hoặc ném ra ngoại lệ nếu không tìm thấy
@@ -285,8 +296,6 @@ public class RoomService {
 
         Turn currentTurn = gameSession.getCurrentTurn();
         if (currentTurn == null) return message;
-        // Cập nhật danh sách người chơi trong turn hiện tại
-        currentTurn.setCurrentPlayers(room.getCurrentPlayers());
 
         // 2. Lấy thông tin người gửi, người vẽ và keyword của lượt hiện tại
         Player sender = message.getSender();
@@ -304,7 +313,7 @@ public class RoomService {
             // Nếu người vẽ gửi bất kỳ tin nhắn nào chứa keyword (exact hoặc chứa), xóa nội dung tin nhắn.
             if (containsKeyword) {
                 message.setContent(drawer.getNickname() + ": đã cố tình gian lận");
-            }else {
+            } else {
                 message.setContent(drawer.getNickname() + ": " + message.getContent());
             }
             return message;
@@ -320,7 +329,7 @@ public class RoomService {
                 currentTurn.submitGuess(new Guess(sender, content));
                 message.setContent(sender.getNickname() + " đã đoán đúng từ khóa");
                 return message;
-            }else if (containsKeyword && alreadyGuessed) {
+            } else if (containsKeyword && alreadyGuessed) {
                 // Tin nhắn không phải exact match mà chỉ chứa keyword → xem là gian lận.
                 message.setContent(sender.getNickname() + ": đã cố tình gian lận");
             }
@@ -365,5 +374,8 @@ public class RoomService {
     public synchronized Room getRoomById(String roomId) {
         return rooms.get(roomId);
     }
-
+    public synchronized boolean clearRooms() {
+        rooms.clear();
+        return rooms.isEmpty();
+    }
 }

@@ -9,6 +9,7 @@ import java.util.UUID;
 public class Guess {
     private UUID id;
     private Player player;
+    private int score;
     private String content;
     private Timestamp timestamp;
     private Timestamp timeTaken;

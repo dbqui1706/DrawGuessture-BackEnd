@@ -14,6 +14,7 @@ public class Round implements Serializable {
     private final String id;
     private final List<Turn> turns;
     private Turn currentTurn;
+    private final List<Player> players;
     private final Queue<Player> remainingPlayers;
     private final Set<Player> completedPlayers;
     private RoundState state;
@@ -29,6 +30,7 @@ public class Round implements Serializable {
                  int roundNumber) {
         this.id = UUID.randomUUID().toString();
         this.turns = new ArrayList<>();
+        this.players = new ArrayList<>(players);
         this.remainingPlayers = new LinkedList<>(players);
         this.completedPlayers = new HashSet<>();
         this.state = RoundState.NOT_STARTED;
@@ -52,7 +54,9 @@ public class Round implements Serializable {
         if (!remainingPlayers.isEmpty()) {
             Player nextDrawer = remainingPlayers.poll();
             String keyword = KeywordGenerator.getRandomKeyword();
-            Turn newTurn = new Turn(nextDrawer, keyword, turnTimeLimit, roomId, notifier);
+            // Tạo instance mới cho turn tiếp theo:
+            Turn newTurn = new Turn(nextDrawer, keyword, turnTimeLimit, roomId, notifier, players);
+            // (Nếu cần, cập nhật danh sách currentPlayers cho newTurn)
             this.currentTurn = newTurn;
             this.turns.add(newTurn);
             newTurn.startTurn(() -> {

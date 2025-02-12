@@ -1,6 +1,7 @@
 package fit.nlu.service;
 
 import fit.nlu.enums.MessageType;
+import fit.nlu.enums.RoomState;
 import fit.nlu.model.Message;
 import fit.nlu.model.Room;
 import fit.nlu.model.Turn;
@@ -56,6 +57,7 @@ public class GameEventNotifierImpl implements GameEventNotifier {
         simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/message", message);
 
         Room room = roomService.getRoomById(roomId);
+        room.setState(RoomState.PLAYING);
         // Cập nhập danh sách Player nào đang vẽ
         room.updatePlayerDrawing(turn.getDrawer().getId());
 
@@ -72,11 +74,20 @@ public class GameEventNotifierImpl implements GameEventNotifier {
     }
 
     @Override
-    public void notifyTurnEnd(String roomId, Turn turn) {
+    public synchronized void notifyTurnEnd(String roomId, Turn turn) {
         String drawerName = turn.getDrawer().getNickname();
         Message message = new Message();
         message.setType(MessageType.TURN_END);
         message.setContent("Lượt của " + drawerName + " kết thúc");
+
+        Room room = roomService.getRoomById(roomId);
+        // Update score for players
+        room.updateScoreForPlayers(turn.getCurrentPlayers());
+        room.setState(RoomState.TURN_TIMEOUT);
+
+        simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/turn-end", turn);
+
+        simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/score", room.getCurrentPlayers());
 
         simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/message", message);
         log.info("Notified turn end for drawer {} in room {}", drawerName, roomId);
@@ -108,5 +119,14 @@ public class GameEventNotifierImpl implements GameEventNotifier {
         message.setContent(String.valueOf(turn.getServerRemainingTime()));
 
         simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/time", message);
+    }
+
+    @Override
+    public void notifyTurnResultCountdown(String roomId, Turn turn) {
+        Message message = new Message();
+        message.setType(MessageType.TIME_TURN_UPDATE);
+        message.setContent(String.valueOf(turn.getServerRemainingTimeShowResult()));
+
+        simpMessagingTemplate.convertAndSend("/topic/room/" + roomId + "/timeout", message);
     }
 }

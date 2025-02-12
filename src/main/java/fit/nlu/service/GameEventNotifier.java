@@ -10,4 +10,6 @@ public interface GameEventNotifier {
     void notifyRoundEnd(String roomId, int roundNumber);
     void notifyGameEnd(String roomId);
     void notifyTurnTimeUpdate(String roomId, Turn turn);
+
+    void notifyTurnResultCountdown(String roomId, Turn turn);
 }
